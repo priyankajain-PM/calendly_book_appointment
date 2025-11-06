@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Book the Product Team</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color-scheme: dark; }
+    body { margin:0; background:#0b0b0c; color:#f5f5f7; }
+    header { padding:20px; border-bottom:1px solid #222; position:sticky; top:0; background:rgba(11,11,12,.9); backdrop-filter: blur(5px);}
+    .wrap { max-width: 960px; margin: 0 auto; padding: 24px; }
+    .card { background:#111; border:1px solid #1f1f1f; border-radius:14px; padding:20px; margin:16px 0; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .row > div { flex:1; min-width:220px; }
+    label { display:block; font-size:12px; color:#9aa0a6; margin-bottom:6px; }
+    input,select { background:#0f0f10; border:1px solid #2a2a2a; color:#fff; border-radius:10px; padding:10px; width:100%; }
+    button { cursor:pointer; background:#1e90ff; color:#fff; border:none; border-radius:12px; padding:10px 12px; font-weight:600; }
+    button.secondary { background:#222; border:1px solid #333; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap:12px; }
+    .slot { padding:10px; border-radius:10px; border:1px solid #2a2a2a; background:#141416; font-weight:600; text-align:center; }
+    .muted { color:#9aa0a6; }
+    .kicker { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:#9aa0a6; }
+    .pill { display:inline-flex; align-items:center; gap:8px; background:#151515; border:1px solid #2a2a2a; border-radius:999px; padding:6px 10px; font-size:12px; }
+    .footer { color:#6b7280; font-size:12px; text-align:center; padding:24px 0 48px; }
+    .two { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    @media (max-width:800px){ .two { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header class="wrap">
+  <div class="kicker">Product Team</div>
+  <h2 style="margin:6px 0 0 0">Book time with us</h2>
+  <p class="muted" style="margin:6px 0 0 0">Only open slots are shown. We’ll assign the right teammate automatically.</p>
+</header>
+
+<main class="wrap">
+  <!-- Filters -->
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Timezone</label>
+        <select id="tz"></select>
+      </div>
+      <div>
+        <label>Start (ISO)</label>
+        <input id="start" />
+      </div>
+      <div>
+        <label>End (ISO)</label>
+        <input id="end" />
+      </div>
+      <div style="align-self:end">
+        <button id="load">Load slots</button>
+      </div>
+    </div>
+    <p class="muted" style="margin-top:8px">Tip: pick a 7-day window (Calendly availability endpoint limit).</p>
+  </div>
+
+  <!-- Slots + Booking -->
+  <div class="two">
+    <div class="card">
+      <h3 style="margin-top:0">Available slots</h3>
+      <div id="slotsEmpty" class="muted">No data yet. Click “Load slots”.</div>
+      <div id="slotGrid" class="grid" style="display:none"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Confirm details</h3>
+      <div class="row">
+        <div><label>Name</label><input id="name" placeholder="Your full name" /></div>
+        <div><label>Email</label><input id="email" placeholder="you@company.com" /></div>
+      </div>
+      <p id="when" class="muted" style="min-height:1.5em;margin:10px 0 14px 0"></p>
+      <div class="row">
+        <button id="book" disabled>Book</button>
+        <button id="clear" class="secondary">Clear</button>
+      </div>
+      <p id="status" class="muted" style="margin-top:10px"></p>
+    </div>
+  </div>
+
+  <div class="footer">Backend base URL is assumed to be <code>http://localhost:3001</code>. Change it below if needed.</div>
+</main>
+
+<script>
+  // ====== CONFIG ======
+  const API_BASE = (localStorage.getItem('API_BASE')) || 'http://localhost:3001';
+  // ====================
+
+  // Timezone select
+  const tzEl = document.getElementById('tz');
+  const tzs = (Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : ['UTC']);
+  tzs.forEach(t => { const o=document.createElement('option'); o.value=t; o.textContent=t; tzEl.appendChild(o); });
+  tzEl.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+  // Default dates: now → +7 days (ISO)
+  const startEl = document.getElementById('start');
+  const endEl = document.getElementById('end');
+  const now = new Date();
+  const plus7 = new Date(now.getTime() + 7*24*60*60*1000);
+  startEl.value = new Date(now.toISOString().slice(0,19)).toISOString();
+  endEl.value = new Date(plus7.toISOString().slice(0,19)).toISOString();
+
+
+
+  const loadBtn = document.getElementById('load');
+  const slotGrid = document.getElementById('slotGrid');
+  const slotsEmpty = document.getElementById('slotsEmpty');
+  const whenEl = document.getElementById('when');
+  const bookBtn = document.getElementById('book');
+  const clearBtn = document.getElementById('clear');
+  const statusEl = document.getElementById('status');
+  const nameEl = document.getElementById('name'); const emailEl = document.getElementById('email');
+
+  let selected = null; // { start_time, end_time }
+
+  function fmt(dt, tz) {
+    try {
+      return new Date(dt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', timeZone: tz });
+    } catch {
+      return new Date(dt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    }
+  }
+
+  function setSelected(slot) {
+    selected = slot;
+    const tz = tzEl.value;
+    whenEl.textContent = selected ? `Selected: ${fmt(selected.start_time, tz)} → ${fmt(selected.end_time, tz)} (${tz})` : '';
+    bookBtn.disabled = !selected;
+  }
+
+  async function loadSlots() {
+    const tz = tzEl.value.trim();
+    const start = startEl.value.trim();
+    const end = endEl.value.trim();
+
+    slotGrid.style.display = 'grid';
+    slotGrid.innerHTML = '<div class="muted">Loading…</div>';
+    slotsEmpty.style.display = 'none';
+    statusEl.textContent = '';
+    setSelected(null);
+
+    try {
+      const q = new URLSearchParams({ start, end, timezone: tz });
+      const res = await fetch(`${API_BASE}/api/slots?${q.toString()}`, { credentials: 'omit' });
+      if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+      const json = await res.json();
+
+      const slots = json.slots || [];
+      slotGrid.innerHTML = '';
+      if (!slots.length) {
+        slotGrid.style.display = 'none';
+        slotsEmpty.style.display = 'block';
+        slotsEmpty.textContent = 'No open times in this window.';
+        return;
+      }
+
+      // Slots are unioned server-side; render each as a button.
+      for (const s of slots) {
+        const btn = document.createElement('button');
+        btn.className = 'slot';
+        btn.textContent = `${fmt(s.start_time, tz)} → ${fmt(s.end_time, tz)}`;
+        btn.dataset.start = s.start_time;  // raw from API
+        btn.dataset.end   = s.end_time;    // raw from API
+        btn.onclick = () => {
+          setSelected({ start_time: btn.dataset.start , end_time: btn.dataset.end });
+          // Visually mark selection
+          [...slotGrid.querySelectorAll('.slot')].forEach(el => el.style.outline = 'none');
+          btn.style.outline = '2px solid #1e90ff';
+          btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        };
+        slotGrid.appendChild(btn);
+      }
+    } catch (e) {
+      slotGrid.innerHTML = '';
+      slotGrid.style.display = 'none';
+      slotsEmpty.style.display = 'block';
+      slotsEmpty.textContent = `Failed to load slots: ${e.message}`;
+    }
+  }
+
+
+
+  async function book() {
+    if (!selected) return alert('Pick a slot.');
+    const name = nameEl.value.trim();
+    const email = emailEl.value.trim();
+    if (!name || !email) return alert('Name and email are required.');
+
+    statusEl.textContent = 'Booking…';
+    bookBtn.disabled = true;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/book`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_time: selected.start_time,
+          end_time: selected.end_time,
+          invitee: { name, email }
+        })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.booking?.resource) {
+        statusEl.textContent = 'Booked! Check your email for the invite.';
+      } else if (data.redirect) {
+        statusEl.innerHTML = `Direct booking not available — <a href="${data.redirect}" target="_blank" rel="noopener">click to finish</a>.`;
+      } else {
+        statusEl.textContent = data.error ? `Error: ${data.error}` : 'Unexpected response.';
+      }
+    } catch (e) {
+      statusEl.textContent = `Error: ${e.message}`;
+    } finally {
+      bookBtn.disabled = false;
+    }
+  }
+
+  // Wire up
+  loadBtn.onclick = loadSlots;
+  bookBtn.onclick = book;
+  clearBtn.onclick = () => { setSelected(null); statusEl.textContent=''; };
+
+  // Allow changing API base quickly from the console:
+  //   localStorage.setItem('API_BASE', 'http://localhost:4000'); location.reload();
+</script>
+</body>
+</html>

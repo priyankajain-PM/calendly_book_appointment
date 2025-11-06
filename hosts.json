@@ -1,0 +1,18 @@
+
+[
+    {
+      "host_id": "priyanka",
+      "display_name": "Priyanka Jain",
+      "priority_weight": 100,
+      "event_type_uri": "https://calendly.com/priyanka-jain-flobiz/30min",
+      "pat_env": "CALENDLY_PAT_PRIYANKA"
+    },
+    {
+      "host_id": "pri",
+      "display_name": "priyanka Jain",
+      "priority_weight": 80,
+      "event_type_uri": "https://calendly.com/realpriyal/30min",
+      "pat_env": "CALENDLY_PAT_PRI"
+    }
+  ]
+  
